@@ -18,3 +18,9 @@ func MessageWithContact() th.Predicate {
 		return update.Message != nil && update.Message.Contact != nil
 	}
 }
+
+func MessageWithUsersShared() th.Predicate {
+	return func(_ context.Context, update telego.Update) bool {
+		return update.Message != nil && update.Message.UsersShared != nil
+	}
+}
