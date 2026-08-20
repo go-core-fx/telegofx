@@ -19,6 +19,14 @@ type Bot struct {
 func New(config Config, options []telego.BotOption, logger *zap.Logger) (*Bot, error) {
 	options = append(options, telego.WithLogger(&zapLogger{logger}))
 
+	if config.ProxyURL != "" {
+		client, err := NewSocks5Client(config.ProxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("create socks5 client: %w", err)
+		}
+		options = append(options, telego.WithFastHTTPClient(client))
+	}
+
 	bot, err := telego.NewBot(config.Token, options...)
 	if err != nil {
 		return nil, fmt.Errorf("create bot: %w", err)
