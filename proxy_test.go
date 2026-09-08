@@ -97,7 +97,11 @@ func TestNewWithProxyURLRejectsInvalidProxy(t *testing.T) {
 
 	const token = testToken
 
-	_, err := telegofx.New(telegofx.Config{Token: token, ProxyURL: "http://127.0.0.1:1080"}, nil, zap.NewNop())
+	_, err := telegofx.New(
+		telegofx.Config{Token: token, Mode: telegofx.ModePolling, ProxyURL: "http://127.0.0.1:1080"},
+		nil,
+		zap.NewNop(),
+	)
 	if err == nil {
 		t.Fatal("expected error for invalid proxy url")
 	}
@@ -111,7 +115,7 @@ func TestNewWithoutProxyURL(t *testing.T) {
 
 	const token = testToken
 
-	bot, err := telegofx.New(telegofx.Config{Token: token, ProxyURL: ""}, nil, zap.NewNop())
+	bot, err := telegofx.New(telegofx.Config{Token: token, Mode: telegofx.ModePolling, ProxyURL: ""}, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("create bot: %v", err)
 	}
