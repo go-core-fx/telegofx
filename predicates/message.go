@@ -24,3 +24,11 @@ func MessageWithUsersShared() th.Predicate {
 		return update.Message != nil && update.Message.UsersShared != nil
 	}
 }
+
+func MessageWithReplyToMessage() th.Predicate {
+	return th.And(th.AnyMessageWithFrom(), messageWithReplyTo)
+}
+
+func messageWithReplyTo(_ context.Context, update telego.Update) bool {
+	return update.Message != nil && update.Message.ReplyToMessage != nil
+}
