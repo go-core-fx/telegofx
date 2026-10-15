@@ -264,7 +264,7 @@ linters:
         - ^github.com/golang-jwt/jwt/v5.+Claims$
         - ^github.com/invopop/jsonschema.Reflector$
         - ^github.com/mitchellh/mapstructure.DecoderConfig$
-        - ^github.com/mymmrac/telego.+Params$
+        - ^github.com/mymmrac/telego.+$
         - ^github.com/openai/openai-go/v3/shared\.ResponseFormatJSONSchemaJSONSchemaParam$
         - ^github.com/openai/openai-go/v3/shared\.ResponseFormatJSONSchemaParam$
         - ^github.com/openai/openai-go/v3\.ChatCompletionNewParams$
