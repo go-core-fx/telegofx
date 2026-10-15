@@ -5,12 +5,14 @@ import (
 	"fmt"
 
 	"github.com/go-core-fx/logger"
+	"github.com/go-core-fx/telegofx/fsm"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
 
 type moduleConfig struct {
 	withRouter bool
+	withFSM    bool
 }
 
 // Option configures Module.
@@ -20,6 +22,13 @@ type Option func(*moduleConfig)
 func WithRouter() Option {
 	return func(cfg *moduleConfig) {
 		cfg.withRouter = true
+	}
+}
+
+// WithFSM includes the FSM module in the returned Module.
+func WithFSM() Option {
+	return func(cfg *moduleConfig) {
+		cfg.withFSM = true
 	}
 }
 
@@ -41,6 +50,9 @@ func Module(opts ...Option) fx.Option {
 	}
 	if cfg.withRouter {
 		options = append(options, RouterModule())
+	}
+	if cfg.withFSM {
+		options = append(options, fsm.Module())
 	}
 
 	return fx.Module(
