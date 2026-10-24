@@ -3,9 +3,12 @@ package telegofx
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/mymmrac/telego"
+	ta "github.com/mymmrac/telego/telegoapi"
 	"go.uber.org/zap"
 )
 
@@ -19,20 +22,30 @@ type Bot struct {
 	mu      sync.RWMutex
 	handler telego.WebhookHandler
 
+	activity *activityCaller
+
+	requestTimeout time.Duration
+
 	logger *zap.Logger
 }
 
-// New creates a new Bot from the given configuration and options.
-func New(config Config, options []telego.BotOption, logger *zap.Logger) (*Bot, error) {
-	options = append(options, telego.WithLogger(&zapLogger{logger}))
-
-	if config.ProxyURL != "" {
-		client, err := NewSocks5Client(config.ProxyURL)
-		if err != nil {
-			return nil, fmt.Errorf("create socks5 client: %w", err)
-		}
-		options = append(options, telego.WithFastHTTPClient(client))
+// New creates a new Bot from the given configuration and HTTP client and
+// options.
+//
+// The caller owns the client: it carries the proxy routing and the
+// per-request timeout that keep a stalled Telegram request from hanging the
+// polling loop (a client without a Timeout is only warned about, never
+// mutated). telegofx contributes the recording API caller before the
+// caller's options, so a caller-supplied client option still wins, and the
+// zap logger last.
+func New(config Config, httpClient *http.Client, options []telego.BotOption, logger *zap.Logger) (*Bot, error) {
+	if httpClient.Timeout == 0 {
+		logger.Warn("http client has no Timeout, a stalled Bot API request can hang the bot")
 	}
+
+	activity := newActivityCaller(ta.HTTPCaller{Client: httpClient})
+	options = append([]telego.BotOption{telego.WithAPICaller(activity)}, options...)
+	options = append(options, telego.WithLogger(&zapLogger{logger}))
 
 	bot, err := telego.NewBot(config.Token, options...)
 	if err != nil {
@@ -49,8 +62,19 @@ func New(config Config, options []telego.BotOption, logger *zap.Logger) (*Bot, e
 		mu:      sync.RWMutex{},
 		handler: nil,
 
+		activity:       activity,
+		requestTimeout: httpClient.Timeout,
+
 		logger: logger,
 	}, nil
+}
+
+// LastAPIActivity returns the time of the last completed Bot API call -
+// success or failure - or the zero time while no call has completed yet
+// (including before the bot starts polling). A request that stalls forever
+// never completes and never updates this timestamp.
+func (b *Bot) LastAPIActivity() time.Time {
+	return b.activity.lastActivity()
 }
 
 // HandleUpdate delivers a raw webhook update payload to the registered
