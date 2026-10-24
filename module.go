@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/go-core-fx/healthfx"
 	"github.com/go-core-fx/logger"
 	"github.com/go-core-fx/telegofx/fsm"
 	"go.uber.org/fx"
@@ -13,6 +14,7 @@ import (
 type moduleConfig struct {
 	withRouter bool
 	withFSM    bool
+	withHealth bool
 }
 
 // Option configures Module.
@@ -31,6 +33,17 @@ func WithRouter() Option {
 func WithFSM() Option {
 	return func(cfg *moduleConfig) {
 		cfg.withFSM = true
+	}
+}
+
+// WithHealth includes the Bot API activity liveness provider in the returned
+// Module. The served check goes red once no Bot API call has completed for
+// three times the HTTP client timeout, catching a polling loop stalled
+// without errors. Requires healthfx.Module() in the graph for the check to
+// be served.
+func WithHealth() Option {
+	return func(cfg *moduleConfig) {
+		cfg.withHealth = true
 	}
 }
 
@@ -56,6 +69,9 @@ func Module(opts ...Option) fx.Option {
 	if cfg.withFSM {
 		options = append(options, fsm.Module())
 	}
+	if cfg.withHealth {
+		options = append(options, HealthModule())
+	}
 
 	return fx.Module(
 		"telegofx",
@@ -72,6 +88,15 @@ func RouterModule() fx.Option {
 		fx.Invoke(func(lc fx.Lifecycle, router *Router, logger *zap.Logger, sh fx.Shutdowner) {
 			lc.Append(newRouterHook(router, logger, sh))
 		}),
+	)
+}
+
+// HealthModule returns an fx module that registers the Bot API activity
+// liveness provider into healthfx's provider group.
+func HealthModule() fx.Option {
+	return fx.Module(
+		"bothealth",
+		fx.Provide(healthfx.AsProvider(newBotHealth)),
 	)
 }
 
