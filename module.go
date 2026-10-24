@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/go-core-fx/healthfx"
 	"github.com/go-core-fx/logger"
 	"github.com/go-core-fx/telegofx/fsm"
 	"go.uber.org/fx"
@@ -13,13 +14,14 @@ import (
 type moduleConfig struct {
 	withRouter bool
 	withFSM    bool
+	withHealth bool
 }
 
-// Option configures Module.
-type Option func(*moduleConfig)
+// ModuleOption configures Module.
+type ModuleOption func(*moduleConfig)
 
 // WithRouter includes the router module in the returned Module.
-func WithRouter() Option {
+func WithRouter() ModuleOption {
 	return func(cfg *moduleConfig) {
 		cfg.withRouter = true
 	}
@@ -28,15 +30,32 @@ func WithRouter() Option {
 // WithFSM includes the FSM module in the returned Module. The application
 // must provide an fsm.Storage implementation in the fx graph, otherwise fx
 // fails at startup with a missing type error.
-func WithFSM() Option {
+func WithFSM() ModuleOption {
 	return func(cfg *moduleConfig) {
 		cfg.withFSM = true
 	}
 }
 
+// WithHealth includes the getUpdates activity liveness provider in the
+// returned Module. The served check goes red once no getUpdates request has
+// completed for three times the HTTP client timeout, catching a polling
+// loop stalled without errors. Requires healthfx.Module() in the graph for
+// the check to be served.
+//
+// The check observes polling through the recording transport telegofx wraps
+// around the client supplied with WithHTTPClient (see New). A telego client
+// or caller option passed with WithBotOptions bypasses that transport, so in
+// polling mode the check then stays red no matter how healthy the bot is.
+// Do not combine such options with WithHealth.
+func WithHealth() ModuleOption {
+	return func(cfg *moduleConfig) {
+		cfg.withHealth = true
+	}
+}
+
 // Module returns an fx module that provides a Bot, runs it according to the
 // configured delivery mode, and exposes HandleUpdate as a WebhookHandler.
-func Module(opts ...Option) fx.Option {
+func Module(opts ...ModuleOption) fx.Option {
 	cfg := new(moduleConfig)
 	for _, opt := range opts {
 		opt(cfg)
@@ -56,6 +75,9 @@ func Module(opts ...Option) fx.Option {
 	if cfg.withFSM {
 		options = append(options, fsm.Module())
 	}
+	if cfg.withHealth {
+		options = append(options, HealthModule())
+	}
 
 	return fx.Module(
 		"telegofx",
@@ -72,6 +94,15 @@ func RouterModule() fx.Option {
 		fx.Invoke(func(lc fx.Lifecycle, router *Router, logger *zap.Logger, sh fx.Shutdowner) {
 			lc.Append(newRouterHook(router, logger, sh))
 		}),
+	)
+}
+
+// HealthModule returns an fx module that registers the Bot API activity
+// liveness provider into healthfx's provider group.
+func HealthModule() fx.Option {
+	return fx.Module(
+		"bothealth",
+		fx.Provide(healthfx.AsProvider(newBotHealth)),
 	)
 }
 

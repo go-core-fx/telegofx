@@ -3,7 +3,9 @@ package telegofx
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/mymmrac/telego"
 	"go.uber.org/zap"
@@ -19,22 +21,74 @@ type Bot struct {
 	mu      sync.RWMutex
 	handler telego.WebhookHandler
 
+	activity *activityTransport
+
+	requestTimeout time.Duration
+
 	logger *zap.Logger
 }
 
-// New creates a new Bot from the given configuration and options.
-func New(config Config, options []telego.BotOption, logger *zap.Logger) (*Bot, error) {
-	options = append(options, telego.WithLogger(&zapLogger{logger}))
+// Option configures New.
+type Option func(*options)
 
-	if config.ProxyURL != "" {
-		client, err := NewSocks5Client(config.ProxyURL)
-		if err != nil {
-			return nil, fmt.Errorf("create socks5 client: %w", err)
-		}
-		options = append(options, telego.WithFastHTTPClient(client))
+// options carries the bot-scoped dependencies New assembles from the
+// Option values: the HTTP client and any extra telego bot options.
+type options struct {
+	client     *http.Client
+	botOptions []telego.BotOption
+}
+
+// WithHTTPClient supplies the HTTP client the bot's API traffic rides. It is
+// optional: without it New falls back to a plain default client (no proxy,
+// no timeout). The client carries the proxy routing and the per-request
+// timeout that keep a stalled Telegram request from hanging the polling
+// loop (a client without a Timeout is only warned about, never mutated).
+func WithHTTPClient(client *http.Client) Option {
+	return func(o *options) {
+		o.client = client
+	}
+}
+
+// WithBotOptions passes additional telego bot options through to
+// telego.NewBot. They apply after telegofx's own options, so a caller or
+// client option among them (telego.WithAPICaller, telego.WithHTTPClient,
+// telego.WithFastHTTPClient) replaces what telegofx installed and hides
+// traffic from Bot.LastAPIActivity and the WithHealth check.
+func WithBotOptions(opts ...telego.BotOption) Option {
+	return func(o *options) {
+		o.botOptions = append(o.botOptions, opts...)
+	}
+}
+
+// New creates a new Bot from the given configuration and options.
+//
+// Options own the bot's HTTP surface: WithHTTPClient supplies the optional
+// client, WithBotOptions passes extra telego options. telegofx installs its
+// own client first - a shallow copy of the supplied one whose transport
+// records getUpdates completions for the WithHealth liveness check - then
+// the caller's options, and the zap logger last, so the caller's options
+// take precedence.
+func New(config Config, opts []Option, logger *zap.Logger) (*Bot, error) {
+	o := new(options)
+	for _, opt := range opts {
+		opt(o)
+	}
+	if o.client == nil {
+		o.client = &http.Client{}
+	}
+	if o.client.Timeout == 0 {
+		logger.Warn("http client has no Timeout, a stalled Bot API request can hang the bot")
 	}
 
-	bot, err := telego.NewBot(config.Token, options...)
+	activity := newActivityTransport(o.client.Transport)
+	wrapped := *o.client
+	wrapped.Transport = activity
+
+	telegoOpts := []telego.BotOption{telego.WithHTTPClient(&wrapped)}
+	telegoOpts = append(telegoOpts, o.botOptions...)
+	telegoOpts = append(telegoOpts, telego.WithLogger(&zapLogger{logger}))
+
+	bot, err := telego.NewBot(config.Token, telegoOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("create bot: %w", err)
 	}
@@ -49,8 +103,21 @@ func New(config Config, options []telego.BotOption, logger *zap.Logger) (*Bot, e
 		mu:      sync.RWMutex{},
 		handler: nil,
 
+		activity:       activity,
+		requestTimeout: o.client.Timeout,
+
 		logger: logger,
 	}, nil
+}
+
+// LastAPIActivity returns the time of the last completed getUpdates request -
+// success or failure - or the zero time while polling has not completed one
+// yet (including before the bot starts polling). A request that stalls
+// forever never completes and never updates this timestamp. Non-polling API
+// calls (sendMessage, getMe, ...) do not refresh it: the heartbeat tracks
+// the receive loop, not outbound traffic.
+func (b *Bot) LastAPIActivity() time.Time {
+	return b.activity.lastActivity()
 }
 
 // HandleUpdate delivers a raw webhook update payload to the registered

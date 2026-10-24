@@ -25,7 +25,11 @@ func TestRouterRecoversHandlerPanicByDefault(t *testing.T) {
 
 	cfg := telegofx.Config{Token: testToken, Mode: telegofx.ModePolling}
 
-	bot, err := telegofx.New(cfg, &http.Client{Timeout: time.Second}, nil, zap.NewNop())
+	bot, err := telegofx.New(
+		cfg,
+		[]telegofx.Option{telegofx.WithHTTPClient(&http.Client{Timeout: time.Second})},
+		zap.NewNop(),
+	)
 	if err != nil {
 		t.Fatalf("create bot: %v", err)
 	}
